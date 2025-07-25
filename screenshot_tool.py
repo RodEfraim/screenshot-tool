@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Simple Screenshot Tool for macOS
-Uses native macOS screenshot functionality
+macOS Screenshot Tool with LLM Integration
+Uses native macOS screenshot functionality and sends to HuggingFace
 """
 
 import tkinter as tk
@@ -10,11 +10,15 @@ import subprocess
 import os
 from datetime import datetime
 
+from transformers import Blip2Processor, Blip2ForConditionalGeneration
+from PIL import Image
+import torch
+
 class MacScreenshotTool:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("macOS Screenshot Tool")
-        self.root.geometry("300x200")
+        self.root.title("macOS Screenshot Tool with LLM")
+        self.root.geometry("350x250")
         self.root.resizable(False, False)
         
         self.setup_ui()
@@ -36,7 +40,7 @@ class MacScreenshotTool:
         # Instructions
         instructions = tk.Label(
             main_frame,
-            text="Click a button to use native macOS screenshot",
+            text="Take a screenshot and send to LLM",
             font=('Arial', 10),
             justify='center'
         )
@@ -68,6 +72,18 @@ class MacScreenshotTool:
         )
         self.fullscreen_btn.pack(side='left', padx=10)
         
+        # Send to LLM button
+        self.llm_btn = tk.Button(
+            main_frame,
+            text="Send Latest Screenshot to LLM",
+            command=self.send_to_llm,
+            font=('Arial', 12),
+            padx=20,
+            pady=10,
+            bg='lightblue'
+        )
+        self.llm_btn.pack(pady=(20, 0))
+        
     def select_area(self):
         """Use native macOS area selection"""
         try:
@@ -82,6 +98,7 @@ class MacScreenshotTool:
             
             # Check if file was created
             if os.path.exists(full_path):
+                self.latest_screenshot = full_path
                 messagebox.showinfo("Success", f"Screenshot saved to Desktop:\n{filename}")
             else:
                 messagebox.showinfo("Info", "Screenshot cancelled or no area selected.")
@@ -101,12 +118,56 @@ class MacScreenshotTool:
             full_path = os.path.join(desktop_path, filename)
             
             # Use macOS built-in screenshot
-            subprocess.run(['screencapture', full_path], check=True)
-            messagebox.showinfo("Success", f"Screenshot saved to Desktop:\n{filename}")
-        except subprocess.CalledProcessError:
-            messagebox.showerror("Error", "Failed to capture screenshot.")
+            subprocess.run(['screencapture', full_path])
+            
+            # Check if file was created
+            if os.path.exists(full_path):
+                self.latest_screenshot = full_path
+                messagebox.showinfo("Success", f"Screenshot saved to Desktop:\n{filename}")
+            else:
+                messagebox.showerror("Error", "Failed to capture screenshot.")
+                
         except FileNotFoundError:
             messagebox.showerror("Error", "screencapture not found. This tool requires macOS.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Screenshot failed: {str(e)}")
+    
+    def send_to_llm(self):
+        """Run BLIP-2 locally to describe the latest screenshot."""
+        if not hasattr(self, 'latest_screenshot') or not os.path.exists(self.latest_screenshot):
+            messagebox.showerror("Error", "No screenshot available. Please take a screenshot first.")
+            return
+
+        try:
+            # Load model and processor (no force_download)
+            processor = Blip2Processor.from_pretrained("Salesforce/blip2-opt-2.7b")
+            model = Blip2ForConditionalGeneration.from_pretrained(
+                "Salesforce/blip2-opt-2.7b",
+                torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
+            )
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            model.to(device)
+
+            print("device: ", device)
+
+            # Load the screenshot
+            image = Image.open(self.latest_screenshot).convert("RGB")
+            prompt = "Describe this image in detail."
+
+            # Prepare inputs and run model
+            # TODO: SEE IF TAKING OUT the text=prompt parameter makes it work
+            # inputs = processor(images=image, text=prompt, return_tensors="pt").to(device)
+            inputs = processor(images=image, return_tensors="pt").to(device)
+
+            out = model.generate(**inputs)
+            result = processor.decode(out[0], skip_special_tokens=True)
+
+            messagebox.showinfo("AI Response", f"AI says: {result}")
+
+        except FileNotFoundError:
+            messagebox.showerror("Error", "Model not found. Please run 'python download_models.py' first to download the required models.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to run BLIP-2 locally: {str(e)}")
         
     def run(self):
         """Start the application"""
