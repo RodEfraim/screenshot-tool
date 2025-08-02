@@ -19,18 +19,24 @@ A macOS screenshot utility that captures screenshots and uses local AI models to
 ## Installation
 
 1. **Clone or download this repository**
-2. **Create and activate a virtual environment**:
+
+2. **Install Tesseract OCR** (required for text extraction):
+   ```bash
+   brew install tesseract
+   ```
+
+3. **Create and activate a virtual environment**:
    ```bash
    python3 -m venv venv
    source venv/bin/activate
    ```
 
-3. **Install dependencies**:
+4. **Install dependencies**:
    ```bash
    pip install -r requirements.txt
    ```
 
-4. **Download AI models** (required for AI features):
+5. **Download AI models** (required for AI features):
    ```bash
    python download_models.py
    ```
