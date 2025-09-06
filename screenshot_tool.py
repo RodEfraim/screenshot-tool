@@ -16,6 +16,16 @@ import torch
 
 import pytesseract
 
+import gc
+import torch
+import psutil  # Add this import
+
+def check_memory():
+    """Monitor memory usage"""
+    if torch.cuda.is_available():
+        print(f"GPU Memory: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
+    print(f"RAM Usage: {psutil.virtual_memory().percent}%")
+
 class MacScreenshotTool:
     def __init__(self):
         self.root = tk.Tk()
@@ -218,7 +228,14 @@ class MacScreenshotTool:
             loading_window.destroy()
             
             if cleaned_text:
-                messagebox.showinfo("OCR Results", f"Extracted text:\n\n{cleaned_text}")
+                # Show OCR results and ask if user wants CodeLlama analysis
+                result = messagebox.askyesno(
+                    "OCR Results", 
+                    f"Extracted text:\n\n{cleaned_text}\n\nWould you like to analyze this code with CodeLlama?"
+                )
+                
+                if result:
+                    self.analyze_code_with_codellama(cleaned_text)
             else:
                 messagebox.showinfo("OCR Results", "No text found in the image.")
                 
@@ -226,6 +243,128 @@ class MacScreenshotTool:
             if 'loading_window' in locals():
                 loading_window.destroy()
             messagebox.showerror("Error", f"OCR failed: {str(e)}")
+        
+    def analyze_code_with_codellama(self, cleaned_text):
+        """Analyze Leetcode-style questions using CodeLlama-13B-Instruct with memory management"""
+        try:
+            # Check memory before starting
+            print("=== Memory before loading model ===")
+            check_memory()
+            
+            # Show loading message
+            loading_window = tk.Toplevel(self.root)
+            loading_window.title("CodeLlama Analysis")
+            loading_window.geometry("300x120")
+            loading_label = tk.Label(loading_window, text="Loading CodeLlama model...\nThis may take 30-60 seconds on first run.")
+            loading_label.pack(expand=True)
+            loading_window.update()
+
+            # Memory cleanup before loading
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+
+            # Load CodeLlama model and tokenizer
+            from transformers import AutoTokenizer, AutoModelForCausalLM
+            
+            print("=== Loading model ===")
+            tokenizer = AutoTokenizer.from_pretrained("codellama/CodeLlama-13B-Instruct-hf")
+            model = AutoModelForCausalLM.from_pretrained(
+                "codellama/CodeLlama-13B-Instruct-hf",
+                torch_dtype=torch.float32 if torch.cuda.is_available() else torch.float32,
+                # device_map="auto",
+                device_map="cpu",
+                low_cpu_mem_usage=True,  # Reduce memory usage
+                offload_folder="offload"  # Offload to disk if needed
+            )
+
+            # Check memory after loading
+            print("=== Memory after loading model ===")
+            check_memory()
+
+            # Memory cleanup after loading
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            # Update loading message
+            loading_label.config(text="Analyzing problem with CodeLlama...\nThis may take a minute.")
+            loading_window.update()
+
+            # Create prompt
+            prompt = f"""<s>[INST] Analyze this Leetcode problem and provide a solution approach:
+
+{cleaned_text}
+
+Give me:
+1. What the problem asks for
+2. The algorithm approach
+
+Keep it concise and actionable. [/INST]"""
+
+            # Generate response with memory management
+            inputs = tokenizer(prompt, return_tensors="pt")
+            inputs = inputs.to(model.device)
+            
+            # Check memory before generation
+            print("=== Memory before generation ===")
+            check_memory()
+            
+            # Memory cleanup before generation
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            with torch.no_grad():
+                outputs = model.generate(
+                    **inputs,
+                    max_new_tokens=128,
+                    temperature=0.5,
+                    do_sample=False,
+                    pad_token_id=tokenizer.eos_token_id,
+                    #eos_token_id=tokenizer.eos_token_id,
+                    #repetition_penalty=1.1,
+                    #early_stopping=True
+                )
+            
+            # Check memory after generation
+            print("=== Memory after generation ===")
+            check_memory()
+            
+            # Memory cleanup after generation
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+            response = response[len(prompt):].strip()
+            
+            # Clear model from memory
+            del model
+            del tokenizer
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            # Check memory after cleanup
+            print("=== Memory after cleanup ===")
+            check_memory()
+            
+            loading_window.destroy()
+            messagebox.showinfo("CodeLlama Problem Analysis", f"CodeLlama Analysis:\n\n{response}")
+            
+        except Exception as e:
+            if 'loading_window' in locals():
+                loading_window.destroy()
+            # Memory cleanup on error
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            print("=== Memory after error ===")
+            check_memory()
+            messagebox.showerror("Error", f"CodeLlama analysis failed: {str(e)}")
         
     def run(self):
         """Start the application"""

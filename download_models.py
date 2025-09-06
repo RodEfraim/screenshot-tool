@@ -5,6 +5,7 @@ Downloads required Hugging Face models locally
 """
 
 from transformers import Blip2Processor, Blip2ForConditionalGeneration
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 
 def download_blip2():
@@ -26,13 +27,39 @@ def download_blip2():
         )
         print("✓ Model downloaded successfully")
         
-        print("\n🎉 All models downloaded successfully!")
-        print("You can now run your screenshot tool.")
+        print("\n🎉 BLIP-2 models downloaded successfully!")
         
     except Exception as e:
-        print(f"❌ Error downloading models: {str(e)}")
-        print("Please check your internet connection and try again.")
+        print(f"❌ Error downloading BLIP-2 models: {str(e)}")
+
+def download_codellama():
+    """Download CodeLlama-13B-Instruct model"""
+    print("\nDownloading CodeLlama-13B-Instruct model...")
+    print("This is a large model (~26GB) and may take a long time...")
+    
+    try:
+        # Download tokenizer
+        print("Downloading tokenizer...")
+        tokenizer = AutoTokenizer.from_pretrained("codellama/CodeLlama-13B-Instruct-hf")
+        print("✓ Tokenizer downloaded successfully")
+        
+        # Download model
+        print("Downloading model (this is very large, ~26GB)...")
+        model = AutoModelForCausalLM.from_pretrained(
+            "codellama/CodeLlama-13B-Instruct-hf",
+            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+            device_map="auto"  # Automatically handle model placement
+        )
+        print("✓ CodeLlama model downloaded successfully")
+        
+        print("\n🎉 CodeLlama models downloaded successfully!")
+        
+    except Exception as e:
+        print(f"❌ Error downloading CodeLlama models: {str(e)}")
 
 if __name__ == "__main__":
     print("=== Model Download Script ===")
     download_blip2()
+    download_codellama()
+    print("\n🎉 All models downloaded successfully!")
+    print("You can now run your screenshot tool.")
