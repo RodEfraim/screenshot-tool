@@ -19,6 +19,10 @@ import pytesseract
 import gc
 import torch
 import psutil  # Add this import
+import requests
+
+from dotenv import load_dotenv
+load_dotenv()  # loads .env from project root
 
 def check_memory():
     """Monitor memory usage"""
@@ -228,14 +232,10 @@ class MacScreenshotTool:
             loading_window.destroy()
             
             if cleaned_text:
-                # Show OCR results and ask if user wants CodeLlama analysis
-                result = messagebox.askyesno(
-                    "OCR Results", 
-                    f"Extracted text:\n\n{cleaned_text}\n\nWould you like to analyze this code with CodeLlama?"
-                )
-                
-                if result:
-                    self.analyze_code_with_codellama(cleaned_text)
+                use_api = messagebox.askyesno("OCR Results",
+                    f"Extracted text:\n\n{cleaned_text}\n\nAnalyze with CodeLlama via API?")
+                if use_api:
+                    self.analyze_with_codellama_api(cleaned_text)
             else:
                 messagebox.showinfo("OCR Results", "No text found in the image.")
                 
@@ -243,9 +243,11 @@ class MacScreenshotTool:
             if 'loading_window' in locals():
                 loading_window.destroy()
             messagebox.showerror("Error", f"OCR failed: {str(e)}")
-        
+    
+    # TODO: This is no longer being used... This was the intended function to attempt to run CodeLlama on local machine.
+    """
     def analyze_code_with_codellama(self, cleaned_text):
-        """Analyze Leetcode-style questions using CodeLlama-13B-Instruct with memory management"""
+        \"\"\"Analyze Leetcode-style questions using CodeLlama-13B-Instruct with memory management\"\"\"
         try:
             # Check memory before starting
             print("=== Memory before loading model ===")
@@ -294,7 +296,7 @@ class MacScreenshotTool:
             loading_window.update()
 
             # Create prompt
-            prompt = f"""<s>[INST] Analyze this Leetcode problem and provide a solution approach:
+            prompt = f\"\"\"<s>[INST] Analyze this Leetcode problem and provide a solution approach:
 
 {cleaned_text}
 
@@ -302,7 +304,7 @@ Give me:
 1. What the problem asks for
 2. The algorithm approach
 
-Keep it concise and actionable. [/INST]"""
+Keep it concise and actionable. [/INST]\"\"\"
 
             # Generate response with memory management
             inputs = tokenizer(prompt, return_tensors="pt")
@@ -365,6 +367,78 @@ Keep it concise and actionable. [/INST]"""
             print("=== Memory after error ===")
             check_memory()
             messagebox.showerror("Error", f"CodeLlama analysis failed: {str(e)}")
+    """
+    
+    def analyze_with_codellama_api(self, cleaned_text):
+        """Use Hugging Face Inference API to analyze a Leetcode-style problem."""
+        try:
+            api_token = os.getenv("HUGGINGFACE_API_TOKEN")
+            if not api_token:
+                messagebox.showerror("Error", "Set HUGGINGFACE_API_TOKEN environment variable.")
+                return
+
+            # Validate API token
+            try:
+                masked_token = f"{api_token[:6]}...{api_token[-4:]}" if len(api_token) >= 12 else "<hidden>"
+                print(f"Hugging Face token detected: {masked_token} (len={len(api_token)})")
+                
+                whoami_response = requests.get(
+                    "https://huggingface.co/api/whoami-v2",
+                    headers={"Authorization": f"Bearer {api_token}"},
+                    timeout=10,
+                )
+                if whoami_response.status_code != 200:
+                    messagebox.showerror("Error", f"Token validation failed ({whoami_response.status_code}): {whoami_response.text[:200]}")
+                    return
+                user_name = whoami_response.json().get("name", "<unknown>")
+                print(f"Hugging Face auth OK for: {user_name}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Token validation error: {e}")
+                return
+
+            # Use Hugging Face Inference API endpoint
+            # Note: api-inference.huggingface.co is deprecated but still working until November 2025
+            # TODO: Update to new endpoint when Inference Providers API is fully available
+            model = "codellama/CodeLlama-13B-Instruct-hf"
+            url = f"https://router.huggingface.co/hf-inference/models/{model}"
+            headers = {"Authorization": f"Bearer {api_token}"}
+
+            prompt = f"""<s>[INST] Analyze this Leetcode problem and provide:
+1) What it's asking,
+2) Optimal approach,
+3) Time/space complexity,
+4) Key insights.
+Problem:
+{cleaned_text}
+Keep it concise and actionable. [/INST]"""
+
+            payload = {
+                "inputs": prompt,
+                "parameters": {
+                    "max_new_tokens": 512,
+                    "temperature": 0.5,
+                    "return_full_text": False
+                }
+            }
+
+            resp = requests.post(url, headers=headers, json=payload, timeout=120)
+            if resp.status_code != 200:
+                messagebox.showerror("Error", f"API failed: {resp.status_code}\n{resp.text}")
+                return
+
+            data = resp.json()
+            # HF text-gen responses typically return a list of dicts with 'generated_text'
+            if isinstance(data, list) and data and "generated_text" in data[0]:
+                result = data[0]["generated_text"].strip()
+            else:
+                result = str(data)
+
+            messagebox.showinfo("CodeLlama Analysis", result)
+
+        except requests.Timeout:
+            messagebox.showerror("Error", "API request timed out.")
+        except Exception as e:
+            messagebox.showerror("Error", f"API analysis failed: {str(e)}")
         
     def run(self):
         """Start the application"""
